@@ -4,10 +4,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 #define N 5 // nombre de philosophes = nombre de baguettes 
-#define PORTION 5
+#define PORTION 10
 int baguette_dispo[N];
-pthread_mutex_t mutex;
-pthread_cond_t cond[N];
+pthread_mutex_t mutex; //point d'entrer et sortir du monitor
+pthread_cond_t cond[N]; //une condition pour chaque baguette 
 
 typedef struct philo{
 	int indice_philo;
@@ -33,7 +33,7 @@ void prendre_baguettes(int i){
 	pthread_mutex_unlock(&mutex);
 }
 
-void reposer_baguettes(int i){
+void poser_baguettes(int i){
 	pthread_mutex_lock(&mutex);
 	baguette_dispo[i] = 1;
 	baguette_dispo[(i+1)%N] = 1;
@@ -56,9 +56,13 @@ void *philosophe(void *arg){
 
 		/** Le philospophe a fini de penser et envie de manger**/
 		prendre_baguettes(p->indice_philo);
-		printf("philosophe %d mange une portion\n", p->indice_philo);
+
+		/** A ce point, le philosophe a les deux baguettes et commence à manger**/
+		printf("philosophe %d mange\n", p->indice_philo);
 		p->nbr_portion = manger(p->nbr_portion);
-		reposer_baguettes(p->indice_philo);
+
+		/**poser les deux baguettes **/
+		poser_baguettes(p->indice_philo);
 	}
 	printf("Thread %x indice %d a FINI !\n", (unsigned int)tid, p->indice_philo);
 	return (void *) tid;

@@ -4,15 +4,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #define N 5 // nombre de philosophes = nombre de baguettes 
-#define PORTION 5
-
-void prendre_baguettes(int i);
-void reposer_baguettes(int i);
-int manger(int i);
-void wait_in_fifo(int i);
-void sortir_fifo(int i);
-void signaler_fifo(int i);
-void *philosophe(void *arg);
+#define PORTION 10
 
 typedef struct philo{
 	int indice_philo;
@@ -21,25 +13,64 @@ typedef struct philo{
 
 typedef struct file_baguette{
 	pthread_cond_t cond;
+	philo_t *philo;
 	struct file_baguette *next;
 }file_baguette_t;
 
+/**
+Verifie si les deux baguettes sont disponible
+Sinon, se met en attente dans la file d'attente des baguettes
+Il sort de la file d'attente des deux baguettes quand ils sont disponibles
+**/
+void prendre_baguettes(philo_t *p);
+
+/**
+Signaler les deux philosophes qui son en attente dans les files d'attente des deux baguettes
+**/
+void poser_baguettes(int i);
+
+/**
+Reduire le nombre de portion
+**/
+int manger(int i);
+
+/**
+Le philosophe p entre dans la file d'attente de la baguette i
+**/
+void wait_in_fifo(int i, philo_t *p);
+
+/**
+Sortir de la file d'attente de la baguette i
+**/
+void sortir_fifo(int i);
+
+/**
+cherche le premièr philosophe qui en attente dans la file d'attente de la baguette i
+**/
+void signaler_fifo(int i);
+
+/**
+Le moniteur
+**/
+void *philosophe(void *arg);
+
 int baguette_dispo[N];
 pthread_mutex_t mutex;
-file_baguette_t **fifo_baguettes;
+file_baguette_t **fifo_baguettes; // Un tableau qui contient N pointeur sur file_baguette_t
 
-void prendre_baguettes(int i){
+void prendre_baguettes(philo_t *p){
+	int i = p->indice_philo;
 	pthread_mutex_lock(&mutex);
 	while(!baguette_dispo[i] || !baguette_dispo[(i+1)%N]){
 		if(!baguette_dispo[i]){
-			wait_in_fifo(i);
+			wait_in_fifo(i,p);
 		}
 		else if(!baguette_dispo[(i+1)%N]){
-			wait_in_fifo((i+1)%N);
+			wait_in_fifo((i+1)%N, p);
 		}
 		else if(!baguette_dispo[i] && !baguette_dispo[(i+1)%N]){
-			wait_in_fifo(i);
-			wait_in_fifo((i+1)%N);
+			wait_in_fifo(i, p);
+			wait_in_fifo((i+1)%N, p);
 		}
 	}
 	baguette_dispo[i] = 0;
@@ -49,7 +80,7 @@ void prendre_baguettes(int i){
 	pthread_mutex_unlock(&mutex);
 }
 
-void reposer_baguettes(int i){
+void poser_baguettes(int i){
 	pthread_mutex_lock(&mutex);
 	baguette_dispo[i] = 1;
 	baguette_dispo[(i+1)%N] = 1;
@@ -62,7 +93,7 @@ int manger(int i){
 	return i = i - 1;
 }
 
-void wait_in_fifo(int i){ //attendre baguette numéro i
+void wait_in_fifo(int i, philo_t *p){ //attendre baguette numéro i
 	if(fifo_baguettes[i] == NULL){ //personne attend le baguette i
 		fifo_baguettes[i] = malloc(sizeof(file_baguette_t));
 		file_baguette_t *tete = fifo_baguettes[i];
@@ -70,17 +101,35 @@ void wait_in_fifo(int i){ //attendre baguette numéro i
 			fprintf(stderr, "Cond init error\n");
 			exit(5);
 		}
+		tete->philo = p;
 		tete->next = NULL;
 		pthread_cond_wait(&(tete->cond), &mutex);
-	}else{ //un philosophe est en train d'attandre le baguette i
-		fifo_baguettes[i]->next = malloc(sizeof(file_baguette_t));
-		file_baguette_t *next = fifo_baguettes[i]->next;
-		if(pthread_cond_init(&(next->cond), NULL) != 0){
-			fprintf(stderr, "Cond init error\n");
-			exit(5);
+	}else{ //il peut y avoir deux philosophe maximum qui est en attente
+		int existe = 0;
+		file_baguette_t *courant = fifo_baguettes[i];
+
+		/**Verifie s'il est déjà dans la fifo**/
+		while(courant->next != NULL){
+			if(courant->philo == p)
+				existe = 1;
+			courant = courant->next;
 		}
-		next->next = NULL;
-		pthread_cond_wait(&(next->cond), &mutex);
+
+		/**S'il n'est pas dans le fifo, il peut entrer dans le fifo**/
+		if(!existe){
+			if(fifo_baguettes[i]->next == NULL){
+				fifo_baguettes[i]->next = malloc(sizeof(file_baguette_t));
+				file_baguette_t *next = fifo_baguettes[i]->next;
+				if(pthread_cond_init(&(next->cond), NULL) != 0){
+					fprintf(stderr, "Cond init error\n");
+					exit(5);
+				}
+				next->philo = p;
+				next->next = NULL;
+				pthread_cond_wait(&(next->cond), &mutex);
+			}
+		}
+		
 	}
 }
 
@@ -109,10 +158,10 @@ void *philosophe(void *arg){
 		usleep (rand() / RAND_MAX * 1000000.);
 
 		/** Le philospophe a fini de penser et envie de manger**/
-		prendre_baguettes(p->indice_philo);
-		printf("philosophe %d mange une portion\n", p->indice_philo);
+		prendre_baguettes(p);
+		printf("philospophe %d mange\n", p->indice_philo);
 		p->nbr_portion = manger(p->nbr_portion);
-		reposer_baguettes(p->indice_philo);
+		poser_baguettes(p->indice_philo);
 	}
 	printf("Thread %x indice %d a FINI !\n", (unsigned int)tid, p->indice_philo);
 	return (void *) tid;
